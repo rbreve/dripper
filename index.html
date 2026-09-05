@@ -38,10 +38,20 @@
       </label>
     </section>
 
-    <button id="clear" title="Clear canvas">
-      <i data-lucide="eraser"></i>
-      Clear
-    </button>
+    <div class="canvas-actions">
+      <label class="tool-btn" id="bgUpload" title="Upload background image">
+        <i data-lucide="image-plus"></i>
+        Image
+        <input type="file" id="bgFile" accept="image/*">
+      </label>
+      <button type="button" id="bgRemove" class="tool-btn" title="Remove background image" hidden>
+        <i data-lucide="image-off"></i>
+      </button>
+      <button type="button" id="clear" title="Clear canvas">
+        <i data-lucide="eraser"></i>
+        Clear
+      </button>
+    </div>
   </div>
 
   <section class="toolbar-drip" aria-label="Drip settings">
@@ -86,6 +96,7 @@
   <div id="cursor"></div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/lucide@0.511.0/dist/umd/lucide.min.js"></script>
+<script src="background-paper.js"></script>
 <script src="paint.js"></script>
 </body>
 </html>

@@ -84,6 +84,7 @@ body {
 
 .group-label svg,
 .control svg,
+.tool-btn svg,
 #clear svg {
   width: 13px;
   height: 13px;
@@ -290,11 +291,18 @@ input[type="range"]::-moz-range-thumb {
   color: #8f939b;
 }
 
+.canvas-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.tool-btn,
 #clear {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
   background: #2d3036;
   color: #eee;
   border: 1px solid #3d4046;
@@ -307,9 +315,23 @@ input[type="range"]::-moz-range-thumb {
   text-transform: uppercase;
 }
 
+.tool-btn:hover,
 #clear:hover {
   background: #3a3e46;
   border-color: #555963;
+}
+
+.tool-btn.is-active {
+  border-color: #c8ccd4;
+  background: #3a3e46;
+}
+
+.tool-btn input[type="file"] {
+  display: none;
+}
+
+.tool-btn[hidden] {
+  display: none;
 }
 
 #wrap {

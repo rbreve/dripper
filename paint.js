@@ -49,9 +49,15 @@ const clearBtn = document.getElementById('clear');
 const swatchBox = document.getElementById('swatches');
 const shapeBox = document.getElementById('shapes');
 const anglePreview = document.getElementById('anglePreview');
-
 const PRESETS = ['#1c1c1c', '#ffffff', '#e0201b', '#ff6a00', '#ffd400', '#10a852', '#1567d2', '#7a2ee6', '#ff3fa4'];
 const PAPER = '#f2efe8';
+const background = new BackgroundPaper({
+  paperColor: PAPER,
+  fileInput: document.getElementById('bgFile'),
+  removeButton: document.getElementById('bgRemove'),
+  uploadButton: document.getElementById('bgUpload'),
+  onRedraw: resetSurface,
+});
 
 /* nib shapes: w/h are multiples of brush size (w = along the nib's long axis) */
 const SHAPES = {
@@ -96,15 +102,13 @@ let leftover = 0;      // distance carried between stamps
 
 /* ---------------- canvas / grid setup ---------------- */
 function paintPaper() {
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = PAPER;
-  ctx.fillRect(0, 0, W, H);
-  // faint paper grain
-  ctx.fillStyle = 'rgba(110, 100, 80, 0.04)';
-  const n = (W * H) / 600;
-  for (let i = 0; i < n; i++) {
-    ctx.fillRect(Math.random() * W, Math.random() * H, 1.3, 1.3);
-  }
+  background.paint(ctx, W, H);
+}
+
+function resetSurface() {
+  drips.length = 0;
+  if (vol.length) vol.fill(0);
+  paintPaper();
 }
 
 function initGrid() {
@@ -622,11 +626,7 @@ varyInput.addEventListener('input', () => {
   varyVal.textContent = varyInput.value;
 });
 
-clearBtn.addEventListener('click', () => {
-  drips.length = 0;
-  vol.fill(0);
-  paintPaper();
-});
+clearBtn.addEventListener('click', resetSurface);
 
 window.addEventListener('resize', () => resizeCanvas(true));
 
