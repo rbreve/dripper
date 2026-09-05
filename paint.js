@@ -13,16 +13,10 @@
  *    meander sideways, deposit ink as a trail (width ~ sqrt(volume)),
  *    absorb ink from wet cells they cross, randomly stall (stick-slip),
  *    and end in a bulged droplet when they run dry.
+ *  - Two brush modes: "solid" stamps a flat opaque nib; "realistic" stamps a
+ *    streaky felt texture whose opacity follows the stroke speed (see
+ *    MarkerInkFlow / MarkerDab).
  */
-
-/* ---------------- helpers ---------------- */
-const TAU = Math.PI * 2;
-const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-
-function hexToRgb(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-}
 
 /* ---------------- DOM ---------------- */
 const canvas = document.getElementById('paint');
@@ -32,6 +26,7 @@ const cursorEl = document.getElementById('cursor');
 
 const colorInput = document.getElementById('color');
 const sizeInput = document.getElementById('size');
+const opacityInput = document.getElementById('opacity');
 const angleInput = document.getElementById('angle');
 const dripInput = document.getElementById('drip');
 const freqInput = document.getElementById('freq');
@@ -39,24 +34,30 @@ const wanderInput = document.getElementById('wander');
 const widthInput = document.getElementById('width');
 const varyInput = document.getElementById('vary');
 const sizeVal = document.getElementById('sizeVal');
+const opacityVal = document.getElementById('opacityVal');
 const angleVal = document.getElementById('angleVal');
 const dripVal = document.getElementById('dripVal');
 const freqVal = document.getElementById('freqVal');
 const wanderVal = document.getElementById('wanderVal');
 const widthVal = document.getElementById('widthVal');
 const varyVal = document.getElementById('varyVal');
+const dripToggle = document.getElementById('dripToggle');
+const dripBar = document.querySelector('.toolbar-drip');
 const clearBtn = document.getElementById('clear');
 const swatchBox = document.getElementById('swatches');
 const shapeBox = document.getElementById('shapes');
+const modeBox = document.getElementById('modes');
 const anglePreview = document.getElementById('anglePreview');
 const PRESETS = ['#1c1c1c', '#ffffff', '#e0201b', '#ff6a00', '#ffd400', '#10a852', '#1567d2', '#7a2ee6', '#ff3fa4'];
 const PAPER = '#f2efe8';
 const background = new BackgroundPaper({
   paperColor: PAPER,
-  fileInput: document.getElementById('bgFile'),
-  removeButton: document.getElementById('bgRemove'),
-  uploadButton: document.getElementById('bgUpload'),
   onRedraw: resetSurface,
+});
+const backgroundPicker = new BackgroundPicker({
+  paper: background,
+  root: document.getElementById('bgPicker'),
+  presets: BACKGROUND_PRESETS,
 });
 
 /* nib shapes: w/h are multiples of brush size (w = along the nib's long axis) */
@@ -66,12 +67,24 @@ const SHAPES = {
   square: { w: 0.95, h: 0.95, round: false },
 };
 
+/* brush modes: how the nib puts ink on the paper */
+const BRUSH_MODES = {
+  solid: { label: 'Solid', title: 'Solid ink: flat, fully opaque strokes' },
+  realistic: {
+    label: 'Realistic',
+    title: 'Realistic marker: streaky felt texture, lighter when fast, darker when slow',
+  },
+};
+
 /* ---------------- state ---------------- */
 let W = 0, H = 0, dpr = 1;
 let brushSize = +sizeInput.value;        // diameter in px
+let brushOpacity = +opacityInput.value / 100; // 0..1 paper coverage of a stroke
+let brushMode = 'solid';
 let shapeName = 'chisel';
 let shape = SHAPES[shapeName];
 let nibAngle = (+angleInput.value * Math.PI) / 180;
+let dripEnabled = true;
 let dripAmt = +dripInput.value / 100;    // 0..1, drip size/wetness
 let dripFreq = +freqInput.value / 100;   // 0..1, drips per brush stroke
 let dripWander = +wanderInput.value / 100; // 0..1, how far drips stray off vertical
@@ -141,45 +154,24 @@ function resizeCanvas(preserve) {
   initGrid();
 }
 
-/* ---------------- marker dab (cached stamp) ---------------- */
-/* The dab is rendered once per color/shape change, then blitted along the
- * stroke. PAD leaves room for the soft edge so it isn't clipped. */
-const dab = document.createElement('canvas');
-const DAB = 128;
-const PAD = 6;
+/* ---------------- marker dabs (cached stamps) ---------------- */
+/* Each dab is rendered once per color/shape change, then blitted along the
+ * stroke. One per brush mode; both expose canvas + scaleW/scaleH. */
+const DAB_GEOMETRY = { baseSize: 128, pad: 6 };
+const solidDab = new SolidDab(DAB_GEOMETRY);
+const markerDab = new MarkerDab(DAB_GEOMETRY);
+const inkFlow = new MarkerInkFlow();
 
-let dabSW = 1, dabSH = 1;   // full dab size / solid-nib size
+const isRealistic = () => brushMode === 'realistic';
+const activeDab = () => (isRealistic() ? markerDab : solidDab);
 
-function buildDab() {
-  const dw = Math.round(DAB * shape.w) + PAD * 2;
-  const dh = Math.round(DAB * shape.h) + PAD * 2;
-  dab.width = dw;
-  dab.height = dh;
-  dabSW = dw / (dw - PAD * 2);
-  dabSH = dh / (dh - PAD * 2);
-  const dctx = dab.getContext('2d');
-  dctx.clearRect(0, 0, dw, dh);
-  const c = `${brush.r}, ${brush.g}, ${brush.b}`;
-
-  if (shape.round) {
-    const r = (dw - PAD * 2) / 2;
-    const cx = dw / 2, cy = dh / 2;
-    const g = dctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
-    g.addColorStop(0, `rgba(${c}, 1)`);
-    g.addColorStop(0.9, `rgba(${c}, 1)`);
-    g.addColorStop(1, `rgba(${c}, 0)`);
-    dctx.fillStyle = g;
-    dctx.beginPath();
-    dctx.arc(cx, cy, r, 0, TAU);
-    dctx.fill();
-  } else {
-    // hard-edged nib: a slight blur keeps the corners from aliasing
-    dctx.filter = 'blur(1.2px)';
-    dctx.fillStyle = `rgb(${c})`;
-    dctx.fillRect(PAD, PAD, dw - PAD * 2, dh - PAD * 2);
-    dctx.filter = 'none';
-  }
+function buildDabs() {
+  solidDab.build(shape, brush);
+  markerDab.build(shape, brush);
 }
+
+/* how much the nib flattens under pressure */
+const pressScale = (pr) => 0.65 + 0.7 * pr;
 
 /* ---------------- wet map ops ---------------- */
 function cellAt(x, y) {
@@ -220,7 +212,9 @@ function pushDrip(x, y, vy, volume, r, g, b) {
     vy,
     vol: volume,
     r, g, b,
+    alpha: brushOpacity,
     stall: 0,
+    pooled: false,
     lean: (Math.random() - 0.5) * 0.5 * dripWander,
     phase: Math.random() * TAU,
     wobRate: 2 + Math.random() * 5,
@@ -231,7 +225,7 @@ function pushDrip(x, y, vy, volume, r, g, b) {
 /* drips that fall straight off the nib while painting; they can let go
  * from anywhere along the nib's edge, so wide nibs drip across their width */
 function nibDrip(x, y, p) {
-  if (dripFreq <= 0 || drips.length >= MAX_DRIPS) return;
+  if (!dripEnabled || dripFreq <= 0 || drips.length >= MAX_DRIPS) return;
   if (Math.random() >= p) return;
   const hw = (brushSize / 2) * shape.w;
   const t = (Math.random() - 0.5) * 2 * hw;
@@ -244,28 +238,46 @@ function nibDrip(x, y, p) {
   );
 }
 
-function stamp(x, y, pr, inkScale) {
-  const press = 0.65 + 0.7 * pr;
+/* paper coverage the current stroke should reach where its stamps overlap */
+function inkCoverage() {
+  return isRealistic() ? inkFlow.coverage(speed, brushOpacity) : brushOpacity;
+}
+
+/* overlap: how many stamps land on any one point of the stroke; opacity is
+ * spread across them so coverage follows the slider, not the stamp spacing */
+function stamp(x, y, pr, inkScale, overlap = 1) {
+  const press = pressScale(pr);
   const hw = (brushSize / 2) * shape.w * press;
   const hh = (brushSize / 2) * shape.h * press;
+  const inkOpacity = inkCoverage();
+  const nib = activeDab();
 
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(nibAngle);
-  ctx.drawImage(dab, -hw * dabSW, -hh * dabSH, hw * 2 * dabSW, hh * 2 * dabSH);
+  if (inkOpacity < 1) ctx.globalAlpha = alphaForStackedCoverage(inkOpacity, overlap);
+  ctx.drawImage(nib.canvas, -hw * nib.scaleW, -hh * nib.scaleH, hw * 2 * nib.scaleW, hh * 2 * nib.scaleH);
   ctx.restore();
 
-  // slow, heavy strokes leave more liquid behind
+  // slow, heavy strokes leave more liquid behind; a starved nib leaves less
   const slow = clamp(1.7 - speed / 240, 0.35, 1.7);
   // spread the wetness across the nib footprint, not just its center point
   const n = clamp(Math.round((hw * 2) / CELL), 1, 8);
-  const amt = (brushSize * 0.07 * slow * (0.5 + pr) * inkScale) / Math.sqrt(n);
+  const amt = (brushSize * 0.07 * slow * (0.5 + pr) * inkScale * inkOpacity) / Math.sqrt(n);
   if (amt <= 0) return;
   const cos = Math.cos(nibAngle), sin = Math.sin(nibAngle);
   for (let i = 0; i < n; i++) {
     const t = n === 1 ? 0 : (i / (n - 1) - 0.5) * 2 * hw;
     addInk(x + cos * t, y + sin * t, amt);
   }
+}
+
+/* stamps stacked on one point of the stroke: the nib's length along the
+ * travel direction divided by the stamp spacing */
+function stampOverlap(dx, dy, pr, spacing) {
+  const half = (brushSize / 2) * pressScale(pr);
+  const theta = Math.atan2(dy, dx) - nibAngle;
+  return Math.max(1, nibExtentAlong(half * shape.w, half * shape.h, theta) / spacing);
 }
 
 function strokeTo(x, y, t, pr) {
@@ -276,6 +288,7 @@ function strokeTo(x, y, t, pr) {
   const dtms = Math.max(1, t - lastT);
   speed = speed * 0.65 + (dist / dtms) * 1000 * 0.35;
   pressure = pr;
+  if (isRealistic()) inkFlow.travel(dist, speed, dtms / 1000);
 
   // Step by the nib's narrow dimension so thin edges still draw a solid line.
   // Flat nibs need a tighter step or their corners scallop the stroke edge.
@@ -284,6 +297,7 @@ function strokeTo(x, y, t, pr) {
   // A long jump (fast stroke, or a synthetic drag) must not cost unbounded
   // work: thin the stamps out rather than stamping thousands of times.
   if (dist / spacing > MAX_STAMPS) spacing = dist / MAX_STAMPS;
+  const overlap = stampOverlap(dx, dy, pr, spacing);
   // expected drips per px of stroke, scaled by brush size
   const nibP = spacing * dripFreq * 0.045 * (brushSize / 22);
   const d0 = spacing - leftover;
@@ -292,7 +306,7 @@ function strokeTo(x, y, t, pr) {
       const f = d / dist;
       const sx = lastX + dx * f;
       const sy = lastY + dy * f;
-      stamp(sx, sy, pr, 1);
+      stamp(sx, sy, pr, 1, overlap);
       nibDrip(sx, sy, nibP);
     }
     leftover = (dist - d0) % spacing;
@@ -321,7 +335,11 @@ canvas.addEventListener('pointerdown', (e) => {
   lastY = p.y;
   lastT = e.timeStamp;
   lastMoveT = performance.now();
-  stamp(p.x, p.y, pressure, 1);
+  if (isRealistic()) {
+    inkFlow.beginStroke();
+    markerDab.reseed();
+  }
+  stamp(p.x, p.y, pressure, 1, inkFlow.loneStampOverlap());
   // capture is a nicety — never let it abort the stroke
   try {
     canvas.setPointerCapture(e.pointerId);
@@ -350,7 +368,8 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 /* holding the marker in place floods the spot */
 function stationaryDeposit(dt) {
   speed *= 0.85;
-  stamp(lastX, lastY, pressure, 0);
+  if (isRealistic()) inkFlow.rest(dt);
+  stamp(lastX, lastY, pressure, 0, inkFlow.loneStampOverlap());
   addInk(lastX, lastY, brushSize * 0.04 * (0.5 + pressure) * dt * 60);
   nibDrip(lastX, lastY, dripFreq * 6 * dt * (brushSize / 22));
 }
@@ -358,7 +377,7 @@ function stationaryDeposit(dt) {
 /* ---------------- drips ---------------- */
 function spawnDrips(dt) {
   const evap = Math.exp(-dt * 0.07); // wet ink slowly dries
-  const noDrip = dripAmt <= 0 && dripFreq <= 0;
+  const noDrip = !dripEnabled || (dripAmt <= 0 && dripFreq <= 0);
   const cap = 10 - 8.5 * dripAmt;
   const pk = (0.3 + 2.2 * (dripAmt + dripFreq) * 0.5) * dt;
 
@@ -397,6 +416,10 @@ function dripWidth(d) {
   return dripCore(d) * dripWidthScale;
 }
 
+function dripColor(d) {
+  return `rgba(${d.r | 0}, ${d.g | 0}, ${d.b | 0}, ${d.alpha})`;
+}
+
 /* How far off vertical the drip is running right now, as a slope (dx per dy).
  * Wander is a property of the *path*, not of sideways speed: a fast fat drip
  * carves the same shape as a slow one, it just gets there sooner.
@@ -424,7 +447,7 @@ function dripLean(d, dt) {
 
 function drawBulb(d) {
   const w = dripWidth(d) + 0.6;
-  ctx.fillStyle = `rgb(${d.r | 0}, ${d.g | 0}, ${d.b | 0})`;
+  ctx.fillStyle = dripColor(d);
   ctx.beginPath();
   ctx.ellipse(d.x, d.y, w * 0.62, w * 0.82, 0, 0, TAU);
   ctx.fill();
@@ -437,11 +460,14 @@ function updateDrips(dt) {
     if (d.stall > 0) {
       // stick-slip: the drip pins in place and pools while ink wicks away
       d.stall -= dt;
-      const w = dripWidth(d);
-      ctx.fillStyle = `rgb(${d.r | 0}, ${d.g | 0}, ${d.b | 0})`;
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, w * 0.55, 0, TAU);
-      ctx.fill();
+      if (!d.pooled) {
+        d.pooled = true;
+        const w = dripWidth(d);
+        ctx.fillStyle = dripColor(d);
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, w * 0.55, 0, TAU);
+        ctx.fill();
+      }
       d.vol -= dt * 0.4;
       if (d.vol <= END_VOL) {
         drawBulb(d);
@@ -450,6 +476,7 @@ function updateDrips(dt) {
         // a pinned drip usually breaks away to one side, not straight down
         d.lean += (Math.random() - 0.5) * 1.4 * dripWander;
         d.vx = 0;
+        d.pooled = false;
       }
       continue;
     }
@@ -481,17 +508,21 @@ function updateDrips(dt) {
       d.vol = nv;
     }
 
-    const w = dripWidth(d);
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = `rgb(${d.r | 0}, ${d.g | 0}, ${d.b | 0})`;
-    ctx.lineWidth = w;
-    ctx.beginPath();
-    ctx.moveTo(px, py);
-    ctx.lineTo(d.x, d.y);
-    ctx.stroke();
+    const dist = Math.hypot(d.x - px, d.y - py);
+    if (dist >= 0.45) {
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.lineCap = 'butt';
+      ctx.strokeStyle = dripColor(d);
+      ctx.lineWidth = dripWidth(d);
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(d.x, d.y);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // the trail costs volume: wider trails drain faster
-    const dist = Math.hypot(d.x - px, d.y - py);
     d.vol -= dist * (0.018 + 0.011 * dripCore(d));
 
     // small drips tend to pin and stall
@@ -548,7 +579,7 @@ function updateAnglePreview() {
 
 function setColor(hex) {
   brush = hexToRgb(hex);
-  buildDab();
+  buildDabs();
   for (const el of swatchBox.children) {
     el.classList.toggle('active', el.dataset.color === hex);
   }
@@ -558,11 +589,29 @@ function setColor(hex) {
 function setShape(name) {
   shapeName = name;
   shape = SHAPES[name];
-  buildDab();
+  buildDabs();
   for (const el of shapeBox.children) {
     el.classList.toggle('active', el.dataset.shape === name);
   }
   updateAnglePreview();
+}
+
+function setMode(name) {
+  brushMode = name;
+  for (const el of modeBox.children) {
+    el.classList.toggle('active', el.dataset.mode === name);
+  }
+}
+
+for (const [name, mode] of Object.entries(BRUSH_MODES)) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'mode';
+  b.dataset.mode = name;
+  b.title = mode.title;
+  b.textContent = mode.label;
+  b.addEventListener('click', () => setMode(name));
+  modeBox.appendChild(b);
 }
 
 for (const name of Object.keys(SHAPES)) {
@@ -593,6 +642,11 @@ colorInput.addEventListener('input', () => setColor(colorInput.value));
 sizeInput.addEventListener('input', () => {
   brushSize = +sizeInput.value;
   sizeVal.textContent = sizeInput.value;
+});
+
+opacityInput.addEventListener('input', () => {
+  brushOpacity = +opacityInput.value / 100;
+  opacityVal.textContent = opacityInput.value;
 });
 
 angleInput.addEventListener('input', () => {
@@ -626,11 +680,28 @@ varyInput.addEventListener('input', () => {
   varyVal.textContent = varyInput.value;
 });
 
+function setDripsEnabled(on) {
+  dripEnabled = on;
+  dripToggle.classList.toggle('is-on', on);
+  dripToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+  dripToggle.title = on ? 'Turn drips off' : 'Turn drips on';
+  dripToggle.textContent = on ? 'On' : 'Off';
+  dripBar.classList.toggle('is-off', !on);
+  for (const input of [dripInput, freqInput, wanderInput, widthInput, varyInput]) {
+    input.disabled = !on;
+  }
+  if (!on) drips.length = 0;
+}
+
+dripToggle.addEventListener('click', () => setDripsEnabled(!dripEnabled));
+
 clearBtn.addEventListener('click', resetSurface);
 
 window.addEventListener('resize', () => resizeCanvas(true));
 
 /* ---------------- go ---------------- */
+setDripsEnabled(dripEnabled);
+setMode(brushMode);
 setShape(shapeName);
 setColor(colorInput.value);
 if (window.lucide) lucide.createIcons({ attrs: { width: 13, height: 13, 'stroke-width': 2 } });

@@ -1,61 +1,59 @@
 'use strict';
 
 class BackgroundPaper {
-  constructor({ paperColor, fileInput, removeButton, uploadButton, onRedraw }) {
+  constructor({ paperColor, onRedraw }) {
     this.paperColor = paperColor;
-    this.fileInput = fileInput;
-    this.removeButton = removeButton;
-    this.uploadButton = uploadButton;
     this.onRedraw = onRedraw;
     this.image = null;
     this.objectUrl = null;
-    this.fileInput.addEventListener('change', () => this.onFileChosen());
-    this.removeButton.addEventListener('click', () => this.remove());
+    this.sourceId = 'none';
   }
 
-  async onFileChosen() {
-    const file = this.fileInput.files[0];
-    this.fileInput.value = '';
-    if (!file || !file.type.startsWith('image/')) return;
-    const loaded = await this.loadFile(file);
-    if (loaded) this.onRedraw();
+  async loadPreset(preset) {
+    const img = await this.loadUrl(preset.src);
+    if (!img) return false;
+    this.clearObjectUrl();
+    this.image = img;
+    this.sourceId = preset.id;
+    this.onRedraw();
+    return true;
   }
 
-  loadFile(file) {
+  async loadFile(file) {
+    if (!file || !file.type.startsWith('image/')) return false;
+    const url = URL.createObjectURL(file);
+    const img = await this.loadUrl(url);
+    if (!img) {
+      URL.revokeObjectURL(url);
+      return false;
+    }
+    this.clearObjectUrl();
+    this.image = img;
+    this.objectUrl = url;
+    this.sourceId = 'upload';
+    this.onRedraw();
+    return true;
+  }
+
+  loadUrl(src) {
     return new Promise((resolve) => {
-      const url = URL.createObjectURL(file);
       const img = new Image();
-      img.onload = () => {
-        this.setImage(img, url);
-        resolve(true);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(false);
-      };
-      img.src = url;
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
     });
   }
 
-  setImage(img, url) {
-    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
-    this.image = img;
-    this.objectUrl = url;
-    this.syncControls();
-  }
-
   remove() {
-    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
-    this.objectUrl = null;
+    this.clearObjectUrl();
     this.image = null;
-    this.syncControls();
+    this.sourceId = 'none';
     this.onRedraw();
   }
 
-  syncControls() {
-    const hasImage = !!this.image;
-    this.removeButton.hidden = !hasImage;
-    this.uploadButton.classList.toggle('is-active', hasImage);
+  clearObjectUrl() {
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+    this.objectUrl = null;
   }
 
   paint(ctx, width, height) {
