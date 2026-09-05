@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dripper</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="toolbar">
+  <span class="logo">DRIPPER</span>
+  <div id="swatches"></div>
+  <input type="color" id="color" value="#e0201b" title="Custom color">
+  <div id="shapes" title="Nib shape"></div>
+  <label class="group">Size
+    <input type="range" id="size" min="6" max="64" value="22">
+    <span class="val" id="sizeVal">22</span>
+  </label>
+  <label class="group" title="Nib angle">Angle
+    <input type="range" id="angle" min="0" max="180" value="45">
+    <span class="val" id="angleVal">45</span>
+  </label>
+  <label class="group">Drip
+    <input type="range" id="drip" min="0" max="100" value="55">
+    <span class="val" id="dripVal">55</span>
+  </label>
+  <label class="group" title="Drips per brush stroke">Freq
+    <input type="range" id="freq" min="0" max="100" value="50">
+    <span class="val" id="freqVal">50</span>
+  </label>
+  <label class="group" title="How much drips wander off vertical">Wander
+    <input type="range" id="wander" min="0" max="100" value="45">
+    <span class="val" id="wanderVal">45</span>
+  </label>
+  <label class="group" title="Thickness of the drip trail, in % of normal">Width
+    <input type="range" id="width" min="25" max="250" value="100">
+    <span class="val" id="widthVal">100</span>
+  </label>
+  <label class="group" title="How much drip size varies from drip to drip">Vary
+    <input type="range" id="vary" min="0" max="100" value="55">
+    <span class="val" id="varyVal">55</span>
+  </label>
+  <button id="clear">Clear</button>
+</header>
+<main id="wrap">
+  <canvas id="paint"></canvas>
+  <div id="cursor"></div>
+</main>
+<script src="paint.js"></script>
+</body>
+</html>

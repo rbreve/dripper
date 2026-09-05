@@ -1,0 +1,173 @@
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: #17181b;
+  overflow: hidden;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: #1e2024;
+  color: #cfd2d8;
+  flex-wrap: wrap;
+  user-select: none;
+}
+
+.logo {
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #fff;
+  font-size: 14px;
+  margin-right: 6px;
+}
+
+#swatches {
+  display: flex;
+  gap: 6px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  padding: 0;
+}
+
+.swatch.active {
+  border-color: #1e2024;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+#shapes {
+  display: flex;
+  gap: 4px;
+}
+
+.shape {
+  width: 30px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  background: #2b2e33;
+  border: 1px solid #3d4046;
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.shape i {
+  display: block;
+  background: #cfd2d8;
+}
+
+.shape.active {
+  background: #4a4e56;
+  border-color: #fff;
+}
+
+.shape.active i {
+  background: #fff;
+}
+
+.shape[data-shape="circle"] i {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+}
+
+.shape[data-shape="chisel"] i {
+  width: 18px;
+  height: 6px;
+  transform: rotate(-45deg);
+}
+
+.shape[data-shape="square"] i {
+  width: 13px;
+  height: 13px;
+}
+
+input[type="color"] {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+label.group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+input[type="range"] {
+  width: 110px;
+  accent-color: #e0201b;
+}
+
+.val {
+  width: 24px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #8f939b;
+}
+
+#clear {
+  margin-left: auto;
+  background: #33363c;
+  color: #eee;
+  border: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+#clear:hover {
+  background: #43464d;
+}
+
+#wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+#paint {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: none;
+}
+
+#cursor {
+  position: absolute;
+  pointer-events: none;
+  border: 1.5px solid rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+}
