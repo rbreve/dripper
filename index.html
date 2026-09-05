@@ -8,44 +8,84 @@
 </head>
 <body>
 <header id="toolbar">
-  <span class="logo">DRIPPER</span>
-  <div id="swatches"></div>
-  <input type="color" id="color" value="#e0201b" title="Custom color">
-  <div id="shapes" title="Nib shape"></div>
-  <label class="group">Size
-    <input type="range" id="size" min="6" max="64" value="22">
-    <span class="val" id="sizeVal">22</span>
-  </label>
-  <label class="group" title="Nib angle">Angle
-    <input type="range" id="angle" min="0" max="180" value="45">
-    <span class="val" id="angleVal">45</span>
-  </label>
-  <label class="group">Drip
-    <input type="range" id="drip" min="0" max="100" value="55">
-    <span class="val" id="dripVal">55</span>
-  </label>
-  <label class="group" title="Drips per brush stroke">Freq
-    <input type="range" id="freq" min="0" max="100" value="50">
-    <span class="val" id="freqVal">50</span>
-  </label>
-  <label class="group" title="How much drips wander off vertical">Wander
-    <input type="range" id="wander" min="0" max="100" value="45">
-    <span class="val" id="wanderVal">45</span>
-  </label>
-  <label class="group" title="Thickness of the drip trail, in % of normal">Width
-    <input type="range" id="width" min="25" max="250" value="100">
-    <span class="val" id="widthVal">100</span>
-  </label>
-  <label class="group" title="How much drip size varies from drip to drip">Vary
-    <input type="range" id="vary" min="0" max="100" value="55">
-    <span class="val" id="varyVal">55</span>
-  </label>
-  <button id="clear">Clear</button>
+  <div class="toolbar-main">
+    <span class="logo">DRIPPER</span>
+
+    <section class="toolbar-group" aria-label="Color">
+      <div id="swatches"></div>
+      <label class="color-picker" title="Custom color">
+        <input type="color" id="color" value="#e0201b">
+      </label>
+    </section>
+
+    <section class="toolbar-group" data-group="brush" aria-label="Brush settings">
+      <span class="group-label">
+        <i data-lucide="paintbrush"></i>
+        Brush
+      </span>
+      <div id="shapes" title="Nib shape"></div>
+      <label class="control" title="Nib size">
+        <i data-lucide="circle-dot"></i>
+        <span class="control-name">Size</span>
+        <input type="range" id="size" min="6" max="64" value="22">
+        <span class="val" id="sizeVal">22</span>
+      </label>
+      <label class="control" title="Nib angle">
+        <span class="angle-preview" id="anglePreview" aria-hidden="true"><i></i></span>
+        <span class="control-name">Angle</span>
+        <input type="range" id="angle" min="0" max="180" value="45">
+        <span class="val" id="angleVal">45</span>
+      </label>
+    </section>
+
+    <button id="clear" title="Clear canvas">
+      <i data-lucide="eraser"></i>
+      Clear
+    </button>
+  </div>
+
+  <section class="toolbar-drip" aria-label="Drip settings">
+    <span class="group-label">
+      <i data-lucide="droplets"></i>
+      Drip
+    </span>
+    <label class="control" title="Drip size and wetness">
+      <i data-lucide="droplet"></i>
+      <span class="control-name">Wet</span>
+      <input type="range" id="drip" min="0" max="100" value="55">
+      <span class="val" id="dripVal">55</span>
+    </label>
+    <label class="control" title="Drips per brush stroke">
+      <i data-lucide="zap"></i>
+      <span class="control-name">Freq</span>
+      <input type="range" id="freq" min="0" max="100" value="50">
+      <span class="val" id="freqVal">50</span>
+    </label>
+    <label class="control" title="How much drips wander off vertical">
+      <i data-lucide="wind"></i>
+      <span class="control-name">Wander</span>
+      <input type="range" id="wander" min="0" max="100" value="45">
+      <span class="val" id="wanderVal">45</span>
+    </label>
+    <label class="control" title="Thickness of the drip trail, in % of normal">
+      <i data-lucide="minus"></i>
+      <span class="control-name">Width</span>
+      <input type="range" id="width" min="25" max="250" value="100">
+      <span class="val" id="widthVal">100</span>
+    </label>
+    <label class="control" title="How much drip size varies from drip to drip">
+      <i data-lucide="dices"></i>
+      <span class="control-name">Vary</span>
+      <input type="range" id="vary" min="0" max="100" value="55">
+      <span class="val" id="varyVal">55</span>
+    </label>
+  </section>
 </header>
 <main id="wrap">
   <canvas id="paint"></canvas>
   <div id="cursor"></div>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.511.0/dist/umd/lucide.min.js"></script>
 <script src="paint.js"></script>
 </body>
 </html>

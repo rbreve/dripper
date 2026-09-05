@@ -48,6 +48,7 @@ const varyVal = document.getElementById('varyVal');
 const clearBtn = document.getElementById('clear');
 const swatchBox = document.getElementById('swatches');
 const shapeBox = document.getElementById('shapes');
+const anglePreview = document.getElementById('anglePreview');
 
 const PRESETS = ['#1c1c1c', '#ffffff', '#e0201b', '#ff6a00', '#ffd400', '#10a852', '#1567d2', '#7a2ee6', '#ff3fa4'];
 const PAPER = '#f2efe8';
@@ -530,12 +531,24 @@ canvas.addEventListener('pointerleave', () => {
 });
 
 /* ---------------- UI wiring ---------------- */
+function updateAnglePreview() {
+  const mark = anglePreview.firstElementChild;
+  const max = 16;
+  const scale = max / Math.max(shape.w, shape.h);
+  mark.style.width = `${shape.w * scale}px`;
+  mark.style.height = `${shape.h * scale}px`;
+  mark.style.borderRadius = shape.round ? '50%' : '1px';
+  mark.style.background = colorInput.value;
+  anglePreview.style.transform = `rotate(${angleInput.value}deg)`;
+}
+
 function setColor(hex) {
   brush = hexToRgb(hex);
   buildDab();
   for (const el of swatchBox.children) {
     el.classList.toggle('active', el.dataset.color === hex);
   }
+  updateAnglePreview();
 }
 
 function setShape(name) {
@@ -545,6 +558,7 @@ function setShape(name) {
   for (const el of shapeBox.children) {
     el.classList.toggle('active', el.dataset.shape === name);
   }
+  updateAnglePreview();
 }
 
 for (const name of Object.keys(SHAPES)) {
@@ -580,6 +594,7 @@ sizeInput.addEventListener('input', () => {
 angleInput.addEventListener('input', () => {
   nibAngle = (+angleInput.value * Math.PI) / 180;
   angleVal.textContent = angleInput.value;
+  updateAnglePreview();
 });
 
 dripInput.addEventListener('input', () => {
@@ -618,5 +633,6 @@ window.addEventListener('resize', () => resizeCanvas(true));
 /* ---------------- go ---------------- */
 setShape(shapeName);
 setColor(colorInput.value);
+if (window.lucide) lucide.createIcons({ attrs: { width: 13, height: 13, 'stroke-width': 2 } });
 resizeCanvas(false);
 requestAnimationFrame(frame);
