@@ -37,7 +37,13 @@
         <input type="range" id="opacity" min="5" max="100" value="100">
         <span class="val" id="opacityVal">100</span>
       </label>
-      <label class="control" title="Nib angle">
+      <label class="control" title="Fine overspray mist drifting around the spray cone" id="mistControl">
+        <i data-lucide="sparkles"></i>
+        <span class="control-name">Mist</span>
+        <input type="range" id="mist" min="0" max="100" value="40">
+        <span class="val" id="mistVal">40</span>
+      </label>
+      <label class="control" title="Nib angle" id="angleControl">
         <span class="angle-preview" id="anglePreview" aria-hidden="true"><i></i></span>
         <span class="control-name">Angle</span>
         <input type="range" id="angle" min="0" max="180" value="45">
@@ -119,6 +125,7 @@
 <script src="nib-geometry.js"></script>
 <script src="solid-dab.js"></script>
 <script src="marker-dab.js"></script>
+<script src="spray-dab.js"></script>
 <script src="marker-ink-flow.js"></script>
 <script src="background-presets.js"></script>
 <script src="background-paper.js"></script>

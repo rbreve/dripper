@@ -268,6 +268,18 @@ body {
   color: #8b9098;
 }
 
+/* spray mode: the cone is round, so nib shape and angle don't apply;
+ * the Mist slider only applies to spray */
+#toolbar:not([data-brush-mode="spray"]) #mistControl {
+  display: none;
+}
+
+#toolbar[data-brush-mode="spray"] #shapes,
+#toolbar[data-brush-mode="spray"] #angleControl {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
 .control:hover,
 .control:focus-within {
   color: #e8eaee;
