@@ -46,6 +46,7 @@ const wanderVal = document.getElementById('wanderVal');
 const widthVal = document.getElementById('widthVal');
 const varyVal = document.getElementById('varyVal');
 const dripToggle = document.getElementById('dripToggle');
+const dynamicToggle = document.getElementById('dynamicToggle');
 const dripBar = document.querySelector('.toolbar-drip');
 const clearBtn = document.getElementById('clear');
 const swatchBox = document.getElementById('swatches');
@@ -95,6 +96,7 @@ let shapeName = 'chisel';
 let shape = SHAPES[shapeName];
 let nibAngle = (+angleInput.value * Math.PI) / 180;
 let dripEnabled = true;
+let dynamicEnabled = false; // fast strokes draw thinner when on
 let dripAmt = +dripInput.value / 100;    // 0..1, drip size/wetness
 let dripFreq = +freqInput.value / 100;   // 0..1, drips per brush stroke
 let dripWander = +wanderInput.value / 100; // 0..1, how far drips stray off vertical
@@ -190,6 +192,28 @@ function buildDabs() {
 
 /* how much the nib flattens under pressure */
 const pressScale = (pr) => 0.65 + 0.7 * pr;
+
+/* dynamic width (optional): a fast hand starves the line, a slow one keeps
+ * it full — same idea as the realistic mode's ink flow, but shrinking the
+ * nib itself rather than its opacity, and available in every brush mode.
+ * The width doesn't track speed directly: it eases toward the speed's target
+ * with its own time constant, so the taper stretches over a visible length
+ * of stroke instead of snapping the moment the hand accelerates. */
+const DYNAMIC_SLOW_SPEED = 40;   // px/s below which the stroke keeps its full width
+const DYNAMIC_FAST_SPEED = 350;  // px/s at which the stroke reaches its thinnest
+const DYNAMIC_MIN_SCALE = 0.1;   // thinnest a fast stroke gets, as a fraction of full width
+const DYNAMIC_EASE = 5;          // 1/s; ~200ms time constant for the width to follow speed
+let dynScale = 1;                // smoothed width factor, 1 = full width
+
+const dynTarget = () =>
+  1 -
+  smoothstep((speed - DYNAMIC_SLOW_SPEED) / (DYNAMIC_FAST_SPEED - DYNAMIC_SLOW_SPEED)) *
+    (1 - DYNAMIC_MIN_SCALE);
+const easeDynScale = (dt) => {
+  dynScale += (dynTarget() - dynScale) * Math.min(1, DYNAMIC_EASE * dt);
+};
+const speedScale = () => (dynamicEnabled ? dynScale : 1);
+const nibScale = (pr) => pressScale(pr) * speedScale();
 
 /* ---------------- wet map ops ---------------- */
 function cellAt(x, y) {
@@ -327,7 +351,7 @@ function sprayGrain(x, y, rad, strength) {
  * spread across them so coverage follows the slider, not the stamp spacing */
 function stamp(x, y, pr, inkScale, overlap = 1) {
   const sh = activeShape();
-  const press = pressScale(pr);
+  const press = nibScale(pr);
   const hw = (nibSize() / 2) * sh.w * press;
   const hh = (nibSize() / 2) * sh.h * press;
   const inkOpacity = inkCoverage();
@@ -369,7 +393,7 @@ function stamp(x, y, pr, inkScale, overlap = 1) {
  * travel direction divided by the stamp spacing */
 function stampOverlap(dx, dy, pr, spacing) {
   const sh = activeShape();
-  const half = (nibSize() / 2) * pressScale(pr);
+  const half = (nibSize() / 2) * nibScale(pr);
   const theta = Math.atan2(dy, dx) - nibAngle;
   return Math.max(1, nibExtentAlong(half * sh.w, half * sh.h, theta) / spacing);
 }
@@ -381,6 +405,7 @@ function strokeTo(x, y, t, pr) {
   if (dist === 0) return;
   const dtms = Math.max(1, t - lastT);
   speed = speed * 0.65 + (dist / dtms) * 1000 * 0.35;
+  easeDynScale(dtms / 1000);
   pressure = pr;
   if (isRealistic()) inkFlow.travel(dist, speed, dtms / 1000);
 
@@ -389,7 +414,9 @@ function strokeTo(x, y, t, pr) {
   // Spray dabs are soft discs, so they blend fine at a wider spacing.
   const sh = activeShape();
   const step = isSpray() ? 0.28 : sh.round ? 0.3 : 0.2;
-  let spacing = Math.max(1.5, nibSize() * Math.min(sh.w, sh.h) * step);
+  // spacing must follow the size actually stamped: dynamic width shrinks fast
+  // strokes, and keeping full-size spacing would break them into beads
+  let spacing = Math.max(1.5, nibSize() * Math.min(sh.w, sh.h) * step * nibScale(pr));
   // A long jump (fast stroke, or a synthetic drag) must not cost unbounded
   // work: thin the stamps out rather than stamping thousands of times.
   if (dist / spacing > MAX_STAMPS) spacing = dist / MAX_STAMPS;
@@ -424,6 +451,7 @@ canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   drawing = true;
   speed = 0;
+  dynScale = 1; // every stroke touches down at full width
   leftover = 0;
   pressure = e.pressure > 0 ? e.pressure : 0.5;
   const p = canvasPos(e);
@@ -465,6 +493,7 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 /* holding the marker in place floods the spot */
 function stationaryDeposit(dt) {
   speed *= 0.85;
+  easeDynScale(dt);
   if (isRealistic()) inkFlow.rest(dt);
   stamp(lastX, lastY, pressure, 0, inkFlow.loneStampOverlap());
   addInk(lastX, lastY, nibSize() * 0.04 * (0.5 + pressure) * dt * 60);
@@ -800,12 +829,23 @@ function setDripsEnabled(on) {
 
 dripToggle.addEventListener('click', () => setDripsEnabled(!dripEnabled));
 
+function setDynamicEnabled(on) {
+  dynamicEnabled = on;
+  dynamicToggle.classList.toggle('is-on', on);
+  dynamicToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+  dynamicToggle.title = on ? 'Turn dynamic width off' : 'Turn dynamic width on';
+  dynamicToggle.textContent = on ? 'On' : 'Off';
+}
+
+dynamicToggle.addEventListener('click', () => setDynamicEnabled(!dynamicEnabled));
+
 clearBtn.addEventListener('click', resetSurface);
 
 window.addEventListener('resize', () => resizeCanvas(true));
 
 /* ---------------- go ---------------- */
 setDripsEnabled(dripEnabled);
+setDynamicEnabled(dynamicEnabled);
 setMode(brushMode);
 setShape(shapeName);
 setColor(colorInput.value);
