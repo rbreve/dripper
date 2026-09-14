@@ -1,6 +1,6 @@
 # dripper
 
-A graffiti marker painter
+A graffiti marker painter with wet-ink drips, a marker and spray-can brush mode, and grainy overspray mist.
 
 <img width="1691" height="919" alt="Screenshot 2026-09-05 at 16 52 03" src="https://github.com/user-attachments/assets/c577bbc8-9b8d-4984-9428-5d1cc02e4d46" />
 
