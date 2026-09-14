@@ -13,20 +13,31 @@
  *    meander sideways, deposit ink as a trail (width ~ sqrt(volume)),
  *    absorb ink from wet cells they cross, randomly stall (stick-slip),
  *    and end in a bulged droplet when they run dry.
- *  - Two brush modes: "solid" stamps a flat opaque nib; "realistic" stamps a
- *    streaky felt texture whose opacity follows the stroke speed (see
- *    MarkerInkFlow / MarkerDab).
+ *  - Three brush modes: "solid" stamps a flat opaque nib; "realistic" stamps
+ *    a streaky felt texture whose opacity follows the stroke speed (see
+ *    MarkerInkFlow / MarkerDab); "spray" stamps a soft round cone whose
+ *    density follows dwell time, with grain and overspray mist thrown at
+ *    screen scale (see SprayDab / sprayGrain).
  */
 
 /* ---------------- DOM ---------------- */
 const canvas = document.getElementById('paint');
 const ctx = canvas.getContext('2d');
+/* In-progress stroke layer. Stamps land here at full strength; the element is
+ * displayed at the Opacity slider's value and composited onto the paint canvas
+ * once, when the stroke ends. That way a translucent stroke reads as one
+ * uniform mark instead of a chain of stacking translucent dabs, and only
+ * separate strokes darken where they cross. */
+const strokeCanvas = document.getElementById('stroke');
+const sctx = strokeCanvas.getContext('2d');
 const wrap = document.getElementById('wrap');
 const cursorEl = document.getElementById('cursor');
 
 const colorInput = document.getElementById('color');
 const sizeInput = document.getElementById('size');
 const opacityInput = document.getElementById('opacity');
+const mistInput = document.getElementById('mist');
+const spreadInput = document.getElementById('spread');
 const angleInput = document.getElementById('angle');
 const dripInput = document.getElementById('drip');
 const freqInput = document.getElementById('freq');
@@ -35,6 +46,8 @@ const widthInput = document.getElementById('width');
 const varyInput = document.getElementById('vary');
 const sizeVal = document.getElementById('sizeVal');
 const opacityVal = document.getElementById('opacityVal');
+const mistVal = document.getElementById('mistVal');
+const spreadVal = document.getElementById('spreadVal');
 const angleVal = document.getElementById('angleVal');
 const dripVal = document.getElementById('dripVal');
 const freqVal = document.getElementById('freqVal');
@@ -42,12 +55,14 @@ const wanderVal = document.getElementById('wanderVal');
 const widthVal = document.getElementById('widthVal');
 const varyVal = document.getElementById('varyVal');
 const dripToggle = document.getElementById('dripToggle');
+const dynamicToggle = document.getElementById('dynamicToggle');
 const dripBar = document.querySelector('.toolbar-drip');
 const clearBtn = document.getElementById('clear');
 const swatchBox = document.getElementById('swatches');
 const shapeBox = document.getElementById('shapes');
 const modeBox = document.getElementById('modes');
 const anglePreview = document.getElementById('anglePreview');
+const toolbarEl = document.getElementById('toolbar');
 const PRESETS = ['#1c1c1c', '#ffffff', '#e0201b', '#ff6a00', '#ffd400', '#10a852', '#1567d2', '#7a2ee6', '#ff3fa4'];
 const PAPER = '#f2efe8';
 const background = new BackgroundPaper({
@@ -63,16 +78,20 @@ const backgroundPicker = new BackgroundPicker({
 /* nib shapes: w/h are multiples of brush size (w = along the nib's long axis) */
 const SHAPES = {
   circle: { w: 1, h: 1, round: true },
-  chisel: { w: 1.5, h: 0.4, round: false },
-  square: { w: 0.95, h: 0.95, round: false },
+  // maxH caps the chisel's absolute thickness so a big nib still reads as a
+  // thin flat edge instead of thickening into a fat bar
+  chisel: { w: 1.5, h: 0.4, round: false, maxH: 10 },
 };
+
+/* effective height factor for a shape at a given nib size, honoring maxH */
+const shapeH = (sh, sizePx) => (sh.maxH != null ? Math.min(sh.h, sh.maxH / sizePx) : sh.h);
 
 /* brush modes: how the nib puts ink on the paper */
 const BRUSH_MODES = {
-  solid: { label: 'Solid', title: 'Solid ink: flat, fully opaque strokes' },
-  realistic: {
-    label: 'Realistic',
-    title: 'Realistic marker: streaky felt texture, lighter when fast, darker when slow',
+  solid: { label: 'Marker', title: 'Marker: flat, opaque strokes' },
+  spray: {
+    label: 'Spray',
+    title: 'Spray can: soft round cone, grainy edges, overspray mist',
   },
 };
 
@@ -80,11 +99,14 @@ const BRUSH_MODES = {
 let W = 0, H = 0, dpr = 1;
 let brushSize = +sizeInput.value;        // diameter in px
 let brushOpacity = +opacityInput.value / 100; // 0..1 paper coverage of a stroke
+let sprayMistAmt = +mistInput.value / 100; // 0..1, how much overspray dust around the spray cone
+let sprayMistSpread = +spreadInput.value / 100; // 0..1, how far that dust scatters out
 let brushMode = 'solid';
 let shapeName = 'chisel';
 let shape = SHAPES[shapeName];
 let nibAngle = (+angleInput.value * Math.PI) / 180;
 let dripEnabled = true;
+let dynamicEnabled = false; // fast strokes draw thinner when on
 let dripAmt = +dripInput.value / 100;    // 0..1, drip size/wetness
 let dripFreq = +freqInput.value / 100;   // 0..1, drips per brush stroke
 let dripWander = +wanderInput.value / 100; // 0..1, how far drips stray off vertical
@@ -121,6 +143,7 @@ function paintPaper() {
 function resetSurface() {
   drips.length = 0;
   if (vol.length) vol.fill(0);
+  sctx.clearRect(0, 0, W, H);
   paintPaper();
 }
 
@@ -149,6 +172,9 @@ function resizeCanvas(preserve) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  strokeCanvas.width = canvas.width;
+  strokeCanvas.height = canvas.height;
+  sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   paintPaper();
   if (snapshot) ctx.drawImage(snapshot, 0, 0, oldW, oldH);
   initGrid();
@@ -160,18 +186,48 @@ function resizeCanvas(preserve) {
 const DAB_GEOMETRY = { baseSize: 128, pad: 6 };
 const solidDab = new SolidDab(DAB_GEOMETRY);
 const markerDab = new MarkerDab(DAB_GEOMETRY);
+const sprayDab = new SprayDab(DAB_GEOMETRY);
 const inkFlow = new MarkerInkFlow();
 
 const isRealistic = () => brushMode === 'realistic';
-const activeDab = () => (isRealistic() ? markerDab : solidDab);
+const isSpray = () => brushMode === 'spray';
+const activeDab = () => (isSpray() ? sprayDab : isRealistic() ? markerDab : solidDab);
+/* a spray cone is round whatever nib shape is selected */
+const activeShape = () => (isSpray() ? SHAPES.circle : shape);
+/* a can throws a cone much wider than a pen nib of the same "size" setting */
+const SPRAY_SIZE_MULT = 2;
+const nibSize = () => (isSpray() ? brushSize * SPRAY_SIZE_MULT : brushSize);
 
 function buildDabs() {
   solidDab.build(shape, brush);
   markerDab.build(shape, brush);
+  sprayDab.build(shape, brush);
 }
 
 /* how much the nib flattens under pressure */
 const pressScale = (pr) => 0.65 + 0.7 * pr;
+
+/* dynamic width (optional): a fast hand starves the line, a slow one keeps
+ * it full — same idea as the realistic mode's ink flow, but shrinking the
+ * nib itself rather than its opacity, and available in every brush mode.
+ * The width doesn't track speed directly: it eases toward the speed's target
+ * with its own time constant, so the taper stretches over a visible length
+ * of stroke instead of snapping the moment the hand accelerates. */
+const DYNAMIC_SLOW_SPEED = 40;   // px/s below which the stroke keeps its full width
+const DYNAMIC_FAST_SPEED = 350;  // px/s at which the stroke reaches its thinnest
+const DYNAMIC_MIN_SCALE = 0.1;   // thinnest a fast stroke gets, as a fraction of full width
+const DYNAMIC_EASE = 5;          // 1/s; ~200ms time constant for the width to follow speed
+let dynScale = 1;                // smoothed width factor, 1 = full width
+
+const dynTarget = () =>
+  1 -
+  smoothstep((speed - DYNAMIC_SLOW_SPEED) / (DYNAMIC_FAST_SPEED - DYNAMIC_SLOW_SPEED)) *
+    (1 - DYNAMIC_MIN_SCALE);
+const easeDynScale = (dt) => {
+  dynScale += (dynTarget() - dynScale) * Math.min(1, DYNAMIC_EASE * dt);
+};
+const speedScale = () => (dynamicEnabled ? dynScale : 1);
+const nibScale = (pr) => pressScale(pr) * speedScale();
 
 /* ---------------- wet map ops ---------------- */
 function cellAt(x, y) {
@@ -227,7 +283,7 @@ function pushDrip(x, y, vy, volume, r, g, b) {
 function nibDrip(x, y, p) {
   if (!dripEnabled || dripFreq <= 0 || drips.length >= MAX_DRIPS) return;
   if (Math.random() >= p) return;
-  const hw = (brushSize / 2) * shape.w;
+  const hw = (nibSize() / 2) * activeShape().w;
   const t = (Math.random() - 0.5) * 2 * hw;
   pushDrip(
     x + Math.cos(nibAngle) * t,
@@ -240,31 +296,109 @@ function nibDrip(x, y, p) {
 
 /* paper coverage the current stroke should reach where its stamps overlap */
 function inkCoverage() {
+  // a can lays down saturated, opaque paint regardless of hand speed; the
+  // "fast stroke" look comes from wider stamp spacing leaving gaps, not from
+  // each dab going translucent (see the sprayGrain rim/mist for that texture)
+  if (isSpray()) return brushOpacity;
   return isRealistic() ? inkFlow.coverage(speed, brushOpacity) : brushOpacity;
 }
 
-/* overlap: how many stamps land on any one point of the stroke; opacity is
- * spread across them so coverage follows the slider, not the stamp spacing */
+/* The specks that make a sprayed edge read as spray, thrown at screen scale
+ * every stamp — grain baked into the cached dab would blur away when the dab
+ * is scaled down to the brush size. A real fat-cap cone (see reference: a
+ * near-solid disc with a dense ring of separated dots right at its boundary
+ * and a scatter of finer sparks trailing a short way past it) is the target,
+ * not a soft airbrush halo. Droplets are individually near-full-strength
+ * paint — they draw into the stroke layer at full strength (the Opacity
+ * slider applies once to the whole layer), which is why this takes a flat
+ * `strength` rather than the stamp's layered alpha.
+ *  - rim: a dense band of droplets straddling the disc's edge, always on —
+ *    this is what makes the boundary read as sprayed instead of a circle;
+ *  - mist: a scatter of fine sparks past the rim, thinning with distance;
+ *    the Mist slider sets how many, the Spread slider sets how far;
+ *  - sputter: the odd fat fleck the can spits, mostly near the rim. */
+function sprayGrain(x, y, rad, strength) {
+  sctx.save();
+  sctx.fillStyle = `rgb(${brush.r}, ${brush.g}, ${brush.b})`;
+
+  const rims = clamp(Math.round(rad * 2.2), 16, 60);
+  for (let i = 0; i < rims; i++) {
+    const ang = Math.random() * TAU;
+    const dist = rad * (0.8 + Math.random() * 0.3);
+    const s = 0.6 + Math.random() * Math.random() * 2.2;
+    sctx.globalAlpha = strength * (0.45 + Math.random() * 0.5);
+    sctx.beginPath();
+    sctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
+    sctx.fill();
+  }
+
+  // Mist drives how many specks fly, Spread drives how far they drift; the
+  // specks themselves stay small — dust, not droplets
+  const m = sprayMistAmt;
+  const count = Math.round(8 + m * (30 + rad * 1.6));
+  const reach = 0.3 + sprayMistSpread * 2;
+  for (let i = 0; i < count; i++) {
+    const ang = Math.random() * TAU;
+    const dist = rad * (1.05 + Math.pow(Math.random(), 2) * reach);
+    const fade = clamp(1.3 - dist / (rad * (1.1 + reach)), 0.1, 1);
+    const s = 0.4 + Math.random() * Math.random() * 1.3;
+    sctx.globalAlpha = strength * fade * (0.3 + Math.random() * 0.55);
+    sctx.beginPath();
+    sctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
+    sctx.fill();
+  }
+
+  if (Math.random() < 0.06 + 0.1 * m) {
+    const ang = Math.random() * TAU;
+    const dist = rad * (0.9 + Math.random() * (0.5 + sprayMistSpread));
+    const s = 0.8 + Math.random() * 1.5;
+    sctx.globalAlpha = strength * (0.6 + Math.random() * 0.35);
+    sctx.beginPath();
+    sctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
+    sctx.fill();
+  }
+  sctx.restore();
+}
+
+/* Stamps go onto the stroke layer, which the Opacity slider scales as a
+ * whole, so self-overlap inside one stroke never darkens. Coverage below the
+ * slider's value (the realistic mode's speed-starved ink) still has to stack
+ * per stamp; `overlap` — how many stamps land on any one point — spreads that
+ * relative coverage across them so it follows the stroke, not the spacing. */
 function stamp(x, y, pr, inkScale, overlap = 1) {
-  const press = pressScale(pr);
-  const hw = (brushSize / 2) * shape.w * press;
-  const hh = (brushSize / 2) * shape.h * press;
+  const sh = activeShape();
+  const press = nibScale(pr);
+  const hw = (nibSize() / 2) * sh.w * press;
+  const hh = (nibSize() / 2) * shapeH(sh, nibSize()) * press;
   const inkOpacity = inkCoverage();
   const nib = activeDab();
+  const relCoverage = Math.min(1, inkOpacity / brushOpacity);
+  const layerAlpha = relCoverage < 1 ? alphaForStackedCoverage(relCoverage, overlap) : 1;
 
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(nibAngle);
-  if (inkOpacity < 1) ctx.globalAlpha = alphaForStackedCoverage(inkOpacity, overlap);
-  ctx.drawImage(nib.canvas, -hw * nib.scaleW, -hh * nib.scaleH, hw * 2 * nib.scaleW, hh * 2 * nib.scaleH);
-  ctx.restore();
+  sctx.save();
+  sctx.translate(x, y);
+  sctx.rotate(nibAngle);
+  sctx.globalAlpha = layerAlpha;
+  sctx.drawImage(nib.canvas, -hw * nib.scaleW, -hh * nib.scaleH, hw * 2 * nib.scaleW, hh * 2 * nib.scaleH);
+  sctx.restore();
+
+  if (isSpray()) sprayGrain(x, y, hw, 1);
 
   // slow, heavy strokes leave more liquid behind; a starved nib leaves less
   const slow = clamp(1.7 - speed / 240, 0.35, 1.7);
   // spread the wetness across the nib footprint, not just its center point
   const n = clamp(Math.round((hw * 2) / CELL), 1, 8);
-  const amt = (brushSize * 0.07 * slow * (0.5 + pr) * inkScale * inkOpacity) / Math.sqrt(n);
+  const amt = (nibSize() * 0.07 * slow * (0.5 + pr) * inkScale * inkOpacity) / Math.sqrt(n);
   if (amt <= 0) return;
+  if (isSpray()) {
+    // the cone wets a whole disc, not a nib line
+    for (let i = 0; i < n; i++) {
+      const ang = Math.random() * TAU;
+      const t = hw * 0.85 * Math.sqrt(Math.random());
+      addInk(x + Math.cos(ang) * t, y + Math.sin(ang) * t, amt);
+    }
+    return;
+  }
   const cos = Math.cos(nibAngle), sin = Math.sin(nibAngle);
   for (let i = 0; i < n; i++) {
     const t = n === 1 ? 0 : (i / (n - 1) - 0.5) * 2 * hw;
@@ -275,9 +409,10 @@ function stamp(x, y, pr, inkScale, overlap = 1) {
 /* stamps stacked on one point of the stroke: the nib's length along the
  * travel direction divided by the stamp spacing */
 function stampOverlap(dx, dy, pr, spacing) {
-  const half = (brushSize / 2) * pressScale(pr);
+  const sh = activeShape();
+  const half = (nibSize() / 2) * nibScale(pr);
   const theta = Math.atan2(dy, dx) - nibAngle;
-  return Math.max(1, nibExtentAlong(half * shape.w, half * shape.h, theta) / spacing);
+  return Math.max(1, nibExtentAlong(half * sh.w, half * shapeH(sh, nibSize()), theta) / spacing);
 }
 
 function strokeTo(x, y, t, pr) {
@@ -287,19 +422,24 @@ function strokeTo(x, y, t, pr) {
   if (dist === 0) return;
   const dtms = Math.max(1, t - lastT);
   speed = speed * 0.65 + (dist / dtms) * 1000 * 0.35;
+  easeDynScale(dtms / 1000);
   pressure = pr;
   if (isRealistic()) inkFlow.travel(dist, speed, dtms / 1000);
 
   // Step by the nib's narrow dimension so thin edges still draw a solid line.
   // Flat nibs need a tighter step or their corners scallop the stroke edge.
-  const step = shape.round ? 0.3 : 0.2;
-  let spacing = Math.max(1.5, brushSize * Math.min(shape.w, shape.h) * step);
+  // Spray dabs are soft discs, so they blend fine at a wider spacing.
+  const sh = activeShape();
+  const step = isSpray() ? 0.28 : sh.round ? 0.3 : 0.2;
+  // spacing must follow the size actually stamped: dynamic width shrinks fast
+  // strokes, and keeping full-size spacing would break them into beads
+  let spacing = Math.max(1.5, nibSize() * Math.min(sh.w, shapeH(sh, nibSize())) * step * nibScale(pr));
   // A long jump (fast stroke, or a synthetic drag) must not cost unbounded
   // work: thin the stamps out rather than stamping thousands of times.
   if (dist / spacing > MAX_STAMPS) spacing = dist / MAX_STAMPS;
   const overlap = stampOverlap(dx, dy, pr, spacing);
   // expected drips per px of stroke, scaled by brush size
-  const nibP = spacing * dripFreq * 0.045 * (brushSize / 22);
+  const nibP = spacing * dripFreq * 0.045 * (nibSize() / 22);
   const d0 = spacing - leftover;
   if (dist >= d0) {
     for (let d = d0; d <= dist; d += spacing) {
@@ -327,7 +467,10 @@ function canvasPos(e) {
 canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   drawing = true;
+  sctx.clearRect(0, 0, W, H);
+  strokeCanvas.style.opacity = brushOpacity;
   speed = 0;
+  dynScale = 1; // every stroke touches down at full width
   leftover = 0;
   pressure = e.pressure > 0 ? e.pressure : 0.5;
   const p = canvasPos(e);
@@ -351,7 +494,8 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   updateCursor(e);
   if (!drawing) return;
-  const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+  const events = coalesced.length ? coalesced : [e];
   for (const ev of events) {
     const p = canvasPos(ev);
     strokeTo(p.x, p.y, ev.timeStamp, ev.pressure > 0 ? ev.pressure : 0.5);
@@ -359,7 +503,14 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 function endStroke() {
+  if (!drawing) return;
   drawing = false;
+  // bake the finished stroke into the paper at the slider's opacity
+  ctx.save();
+  ctx.globalAlpha = brushOpacity;
+  ctx.drawImage(strokeCanvas, 0, 0, W, H);
+  ctx.restore();
+  sctx.clearRect(0, 0, W, H);
 }
 canvas.addEventListener('pointerup', endStroke);
 canvas.addEventListener('pointercancel', endStroke);
@@ -368,10 +519,11 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 /* holding the marker in place floods the spot */
 function stationaryDeposit(dt) {
   speed *= 0.85;
+  easeDynScale(dt);
   if (isRealistic()) inkFlow.rest(dt);
   stamp(lastX, lastY, pressure, 0, inkFlow.loneStampOverlap());
-  addInk(lastX, lastY, brushSize * 0.04 * (0.5 + pressure) * dt * 60);
-  nibDrip(lastX, lastY, dripFreq * 6 * dt * (brushSize / 22));
+  addInk(lastX, lastY, nibSize() * 0.04 * (0.5 + pressure) * dt * 60);
+  nibDrip(lastX, lastY, dripFreq * 6 * dt * (nibSize() / 22));
 }
 
 /* ---------------- drips ---------------- */
@@ -556,9 +708,10 @@ function updateCursor(e) {
   cursorEl.style.display = 'block';
   cursorEl.style.left = `${e.clientX - rect.left}px`;
   cursorEl.style.top = `${e.clientY - rect.top}px`;
-  cursorEl.style.width = `${brushSize * shape.w}px`;
-  cursorEl.style.height = `${brushSize * shape.h}px`;
-  cursorEl.style.borderRadius = shape.round ? '50%' : '1px';
+  const sh = activeShape();
+  cursorEl.style.width = `${nibSize() * sh.w}px`;
+  cursorEl.style.height = `${nibSize() * shapeH(sh, nibSize())}px`;
+  cursorEl.style.borderRadius = sh.round ? '50%' : '1px';
   cursorEl.style.transform = `translate(-50%, -50%) rotate(${angleInput.value}deg)`;
 }
 canvas.addEventListener('pointerleave', () => {
@@ -598,6 +751,8 @@ function setShape(name) {
 
 function setMode(name) {
   brushMode = name;
+  // drives the CSS that shows Mist and dims shape/angle in spray mode
+  toolbarEl.dataset.brushMode = name;
   for (const el of modeBox.children) {
     el.classList.toggle('active', el.dataset.mode === name);
   }
@@ -649,6 +804,16 @@ opacityInput.addEventListener('input', () => {
   opacityVal.textContent = opacityInput.value;
 });
 
+mistInput.addEventListener('input', () => {
+  sprayMistAmt = +mistInput.value / 100;
+  mistVal.textContent = mistInput.value;
+});
+
+spreadInput.addEventListener('input', () => {
+  sprayMistSpread = +spreadInput.value / 100;
+  spreadVal.textContent = spreadInput.value;
+});
+
 angleInput.addEventListener('input', () => {
   nibAngle = (+angleInput.value * Math.PI) / 180;
   angleVal.textContent = angleInput.value;
@@ -695,12 +860,23 @@ function setDripsEnabled(on) {
 
 dripToggle.addEventListener('click', () => setDripsEnabled(!dripEnabled));
 
+function setDynamicEnabled(on) {
+  dynamicEnabled = on;
+  dynamicToggle.classList.toggle('is-on', on);
+  dynamicToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+  dynamicToggle.title = on ? 'Turn dynamic width off' : 'Turn dynamic width on';
+  dynamicToggle.textContent = on ? 'On' : 'Off';
+}
+
+dynamicToggle.addEventListener('click', () => setDynamicEnabled(!dynamicEnabled));
+
 clearBtn.addEventListener('click', resetSurface);
 
 window.addEventListener('resize', () => resizeCanvas(true));
 
 /* ---------------- go ---------------- */
 setDripsEnabled(dripEnabled);
+setDynamicEnabled(dynamicEnabled);
 setMode(brushMode);
 setShape(shapeName);
 setColor(colorInput.value);

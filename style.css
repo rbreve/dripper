@@ -119,6 +119,27 @@ body {
   pointer-events: none;
 }
 
+.dyn-toggle {
+  height: 24px;
+  min-width: 40px;
+  padding: 0 10px;
+  background: #2b2e33;
+  border: 1px solid #3d4046;
+  border-radius: 5px;
+  color: #cfd2d8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.dyn-toggle.is-on {
+  background: #1567d2;
+  border-color: #6aa6ff;
+  color: #fff;
+}
+
 .group-label svg,
 .control svg,
 .tool-btn svg,
@@ -240,11 +261,6 @@ body {
   transform: rotate(-45deg);
 }
 
-.shape[data-shape="square"] i {
-  width: 12px;
-  height: 12px;
-}
-
 .angle-preview {
   width: 18px;
   height: 18px;
@@ -266,6 +282,18 @@ body {
   align-items: center;
   gap: 6px;
   color: #8b9098;
+}
+
+/* each mode only shows its own controls: Mist/Spread are spray-only, and the
+ * cone is round so nib shape and angle disappear in spray mode */
+#toolbar:not([data-brush-mode="spray"]) #mistControl,
+#toolbar:not([data-brush-mode="spray"]) #spreadControl {
+  display: none;
+}
+
+#toolbar[data-brush-mode="spray"] #shapes,
+#toolbar[data-brush-mode="spray"] #angleControl {
+  display: none;
 }
 
 .control:hover,
@@ -470,6 +498,17 @@ input[type="range"]::-moz-range-thumb {
   display: block;
   touch-action: none;
   cursor: none;
+}
+
+/* in-progress stroke layer: stamps land here at full strength and the whole
+ * layer is shown (and finally composited) at the Opacity slider's value */
+#stroke {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
 }
 
 #cursor {
