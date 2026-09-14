@@ -37,6 +37,7 @@ const colorInput = document.getElementById('color');
 const sizeInput = document.getElementById('size');
 const opacityInput = document.getElementById('opacity');
 const mistInput = document.getElementById('mist');
+const spreadInput = document.getElementById('spread');
 const angleInput = document.getElementById('angle');
 const dripInput = document.getElementById('drip');
 const freqInput = document.getElementById('freq');
@@ -46,6 +47,7 @@ const varyInput = document.getElementById('vary');
 const sizeVal = document.getElementById('sizeVal');
 const opacityVal = document.getElementById('opacityVal');
 const mistVal = document.getElementById('mistVal');
+const spreadVal = document.getElementById('spreadVal');
 const angleVal = document.getElementById('angleVal');
 const dripVal = document.getElementById('dripVal');
 const freqVal = document.getElementById('freqVal');
@@ -97,7 +99,8 @@ const BRUSH_MODES = {
 let W = 0, H = 0, dpr = 1;
 let brushSize = +sizeInput.value;        // diameter in px
 let brushOpacity = +opacityInput.value / 100; // 0..1 paper coverage of a stroke
-let sprayMistAmt = +mistInput.value / 100; // 0..1, overspray dust around the spray cone
+let sprayMistAmt = +mistInput.value / 100; // 0..1, how much overspray dust around the spray cone
+let sprayMistSpread = +spreadInput.value / 100; // 0..1, how far that dust scatters out
 let brushMode = 'solid';
 let shapeName = 'chisel';
 let shape = SHAPES[shapeName];
@@ -311,8 +314,8 @@ function inkCoverage() {
  * `strength` rather than the stamp's layered alpha.
  *  - rim: a dense band of droplets straddling the disc's edge, always on —
  *    this is what makes the boundary read as sprayed instead of a circle;
- *  - mist (the Mist slider): a shorter-range scatter of finer sparks past
- *    the rim, thinning with distance; Mist raises count and reach;
+ *  - mist: a scatter of fine sparks past the rim, thinning with distance;
+ *    the Mist slider sets how many, the Spread slider sets how far;
  *  - sputter: the odd fat fleck the can spits, mostly near the rim. */
 function sprayGrain(x, y, rad, strength) {
   sctx.save();
@@ -329,17 +332,16 @@ function sprayGrain(x, y, rad, strength) {
     sctx.fill();
   }
 
+  // Mist drives how many specks fly, Spread drives how far they drift; the
+  // specks themselves stay small — dust, not droplets
   const m = sprayMistAmt;
-  // both particle count and particle size ramp with Mist, so the slider's
-  // top end reads as roughly 3x the old fixed scatter, not just a wider reach
-  const mistBoost = 1 + 2 * m;
-  const count = Math.round((8 + m * (14 + rad * 0.6)) * mistBoost);
-  const reach = 0.35 + m * 1.3;
+  const count = Math.round(8 + m * (30 + rad * 1.6));
+  const reach = 0.3 + sprayMistSpread * 2;
   for (let i = 0; i < count; i++) {
     const ang = Math.random() * TAU;
     const dist = rad * (1.05 + Math.pow(Math.random(), 2) * reach);
     const fade = clamp(1.3 - dist / (rad * (1.1 + reach)), 0.1, 1);
-    const s = (0.5 + Math.random() * Math.random() * 1.6) * mistBoost;
+    const s = 0.4 + Math.random() * Math.random() * 1.3;
     sctx.globalAlpha = strength * fade * (0.3 + Math.random() * 0.55);
     sctx.beginPath();
     sctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
@@ -348,7 +350,7 @@ function sprayGrain(x, y, rad, strength) {
 
   if (Math.random() < 0.06 + 0.1 * m) {
     const ang = Math.random() * TAU;
-    const dist = rad * (0.9 + Math.random() * (0.5 + m));
+    const dist = rad * (0.9 + Math.random() * (0.5 + sprayMistSpread));
     const s = 0.8 + Math.random() * 1.5;
     sctx.globalAlpha = strength * (0.6 + Math.random() * 0.35);
     sctx.beginPath();
@@ -805,6 +807,11 @@ opacityInput.addEventListener('input', () => {
 mistInput.addEventListener('input', () => {
   sprayMistAmt = +mistInput.value / 100;
   mistVal.textContent = mistInput.value;
+});
+
+spreadInput.addEventListener('input', () => {
+  sprayMistSpread = +spreadInput.value / 100;
+  spreadVal.textContent = spreadInput.value;
 });
 
 angleInput.addEventListener('input', () => {
