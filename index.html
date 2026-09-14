@@ -19,10 +19,6 @@
     </section>
 
     <section class="toolbar-group" data-group="brush" aria-label="Brush settings">
-      <span class="group-label">
-        <i data-lucide="paintbrush"></i>
-        Brush
-      </span>
       <div id="modes" title="Brush mode"></div>
       <div id="shapes" title="Nib shape"></div>
       <label class="control" title="Nib size">
@@ -40,14 +36,14 @@
       <label class="control" title="Fine overspray mist drifting around the spray cone" id="mistControl">
         <i data-lucide="sparkles"></i>
         <span class="control-name">Mist</span>
-        <input type="range" id="mist" min="0" max="100" value="40">
-        <span class="val" id="mistVal">40</span>
+        <input type="range" id="mist" min="0" max="100" value="15">
+        <span class="val" id="mistVal">15</span>
       </label>
       <label class="control" title="Nib angle" id="angleControl">
         <span class="angle-preview" id="anglePreview" aria-hidden="true"><i></i></span>
         <span class="control-name">Angle</span>
-        <input type="range" id="angle" min="0" max="180" value="45">
-        <span class="val" id="angleVal">45</span>
+        <input type="range" id="angle" min="0" max="180" value="130">
+        <span class="val" id="angleVal">130</span>
       </label>
       <label class="control" title="Fast strokes draw thinner, slow strokes stay full width">
         <i data-lucide="gauge"></i>
@@ -125,6 +121,7 @@
 </header>
 <main id="wrap">
   <canvas id="paint"></canvas>
+  <canvas id="stroke"></canvas>
   <div id="cursor"></div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/lucide@0.511.0/dist/umd/lucide.min.js"></script>

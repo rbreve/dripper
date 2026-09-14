@@ -23,6 +23,13 @@
 /* ---------------- DOM ---------------- */
 const canvas = document.getElementById('paint');
 const ctx = canvas.getContext('2d');
+/* In-progress stroke layer. Stamps land here at full strength; the element is
+ * displayed at the Opacity slider's value and composited onto the paint canvas
+ * once, when the stroke ends. That way a translucent stroke reads as one
+ * uniform mark instead of a chain of stacking translucent dabs, and only
+ * separate strokes darken where they cross. */
+const strokeCanvas = document.getElementById('stroke');
+const sctx = strokeCanvas.getContext('2d');
 const wrap = document.getElementById('wrap');
 const cursorEl = document.getElementById('cursor');
 
@@ -69,17 +76,17 @@ const backgroundPicker = new BackgroundPicker({
 /* nib shapes: w/h are multiples of brush size (w = along the nib's long axis) */
 const SHAPES = {
   circle: { w: 1, h: 1, round: true },
-  chisel: { w: 1.5, h: 0.4, round: false },
-  square: { w: 0.95, h: 0.95, round: false },
+  // maxH caps the chisel's absolute thickness so a big nib still reads as a
+  // thin flat edge instead of thickening into a fat bar
+  chisel: { w: 1.5, h: 0.4, round: false, maxH: 10 },
 };
+
+/* effective height factor for a shape at a given nib size, honoring maxH */
+const shapeH = (sh, sizePx) => (sh.maxH != null ? Math.min(sh.h, sh.maxH / sizePx) : sh.h);
 
 /* brush modes: how the nib puts ink on the paper */
 const BRUSH_MODES = {
-  solid: { label: 'Solid', title: 'Solid ink: flat, fully opaque strokes' },
-  realistic: {
-    label: 'Realistic',
-    title: 'Realistic marker: streaky felt texture, lighter when fast, darker when slow',
-  },
+  solid: { label: 'Marker', title: 'Marker: flat, opaque strokes' },
   spray: {
     label: 'Spray',
     title: 'Spray can: soft round cone, grainy edges, overspray mist',
@@ -133,6 +140,7 @@ function paintPaper() {
 function resetSurface() {
   drips.length = 0;
   if (vol.length) vol.fill(0);
+  sctx.clearRect(0, 0, W, H);
   paintPaper();
 }
 
@@ -161,6 +169,9 @@ function resizeCanvas(preserve) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  strokeCanvas.width = canvas.width;
+  strokeCanvas.height = canvas.height;
+  sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   paintPaper();
   if (snapshot) ctx.drawImage(snapshot, 0, 0, oldW, oldH);
   initGrid();
@@ -295,27 +306,27 @@ function inkCoverage() {
  * near-solid disc with a dense ring of separated dots right at its boundary
  * and a scatter of finer sparks trailing a short way past it) is the target,
  * not a soft airbrush halo. Droplets are individually near-full-strength
- * paint — their alpha is driven by the Opacity slider, not by the stroke's
- * coverage-stacking math, which is why this takes `strength` (brushOpacity)
- * rather than the stamp's layered alpha.
+ * paint — they draw into the stroke layer at full strength (the Opacity
+ * slider applies once to the whole layer), which is why this takes a flat
+ * `strength` rather than the stamp's layered alpha.
  *  - rim: a dense band of droplets straddling the disc's edge, always on —
  *    this is what makes the boundary read as sprayed instead of a circle;
  *  - mist (the Mist slider): a shorter-range scatter of finer sparks past
  *    the rim, thinning with distance; Mist raises count and reach;
  *  - sputter: the odd fat fleck the can spits, mostly near the rim. */
 function sprayGrain(x, y, rad, strength) {
-  ctx.save();
-  ctx.fillStyle = `rgb(${brush.r}, ${brush.g}, ${brush.b})`;
+  sctx.save();
+  sctx.fillStyle = `rgb(${brush.r}, ${brush.g}, ${brush.b})`;
 
   const rims = clamp(Math.round(rad * 2.2), 16, 60);
   for (let i = 0; i < rims; i++) {
     const ang = Math.random() * TAU;
     const dist = rad * (0.8 + Math.random() * 0.3);
     const s = 0.6 + Math.random() * Math.random() * 2.2;
-    ctx.globalAlpha = strength * (0.45 + Math.random() * 0.5);
-    ctx.beginPath();
-    ctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
-    ctx.fill();
+    sctx.globalAlpha = strength * (0.45 + Math.random() * 0.5);
+    sctx.beginPath();
+    sctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
+    sctx.fill();
   }
 
   const m = sprayMistAmt;
@@ -329,43 +340,47 @@ function sprayGrain(x, y, rad, strength) {
     const dist = rad * (1.05 + Math.pow(Math.random(), 2) * reach);
     const fade = clamp(1.3 - dist / (rad * (1.1 + reach)), 0.1, 1);
     const s = (0.5 + Math.random() * Math.random() * 1.6) * mistBoost;
-    ctx.globalAlpha = strength * fade * (0.3 + Math.random() * 0.55);
-    ctx.beginPath();
-    ctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
-    ctx.fill();
+    sctx.globalAlpha = strength * fade * (0.3 + Math.random() * 0.55);
+    sctx.beginPath();
+    sctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
+    sctx.fill();
   }
 
   if (Math.random() < 0.06 + 0.1 * m) {
     const ang = Math.random() * TAU;
     const dist = rad * (0.9 + Math.random() * (0.5 + m));
     const s = 0.8 + Math.random() * 1.5;
-    ctx.globalAlpha = strength * (0.6 + Math.random() * 0.35);
-    ctx.beginPath();
-    ctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
-    ctx.fill();
+    sctx.globalAlpha = strength * (0.6 + Math.random() * 0.35);
+    sctx.beginPath();
+    sctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, s, 0, TAU);
+    sctx.fill();
   }
-  ctx.restore();
+  sctx.restore();
 }
 
-/* overlap: how many stamps land on any one point of the stroke; opacity is
- * spread across them so coverage follows the slider, not the stamp spacing */
+/* Stamps go onto the stroke layer, which the Opacity slider scales as a
+ * whole, so self-overlap inside one stroke never darkens. Coverage below the
+ * slider's value (the realistic mode's speed-starved ink) still has to stack
+ * per stamp; `overlap` — how many stamps land on any one point — spreads that
+ * relative coverage across them so it follows the stroke, not the spacing. */
 function stamp(x, y, pr, inkScale, overlap = 1) {
   const sh = activeShape();
   const press = nibScale(pr);
   const hw = (nibSize() / 2) * sh.w * press;
-  const hh = (nibSize() / 2) * sh.h * press;
+  const hh = (nibSize() / 2) * shapeH(sh, nibSize()) * press;
   const inkOpacity = inkCoverage();
   const nib = activeDab();
-  const layerAlpha = inkOpacity < 1 ? alphaForStackedCoverage(inkOpacity, overlap) : 1;
+  const relCoverage = Math.min(1, inkOpacity / brushOpacity);
+  const layerAlpha = relCoverage < 1 ? alphaForStackedCoverage(relCoverage, overlap) : 1;
 
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(nibAngle);
-  ctx.globalAlpha = layerAlpha;
-  ctx.drawImage(nib.canvas, -hw * nib.scaleW, -hh * nib.scaleH, hw * 2 * nib.scaleW, hh * 2 * nib.scaleH);
-  ctx.restore();
+  sctx.save();
+  sctx.translate(x, y);
+  sctx.rotate(nibAngle);
+  sctx.globalAlpha = layerAlpha;
+  sctx.drawImage(nib.canvas, -hw * nib.scaleW, -hh * nib.scaleH, hw * 2 * nib.scaleW, hh * 2 * nib.scaleH);
+  sctx.restore();
 
-  if (isSpray()) sprayGrain(x, y, hw, brushOpacity);
+  if (isSpray()) sprayGrain(x, y, hw, 1);
 
   // slow, heavy strokes leave more liquid behind; a starved nib leaves less
   const slow = clamp(1.7 - speed / 240, 0.35, 1.7);
@@ -395,7 +410,7 @@ function stampOverlap(dx, dy, pr, spacing) {
   const sh = activeShape();
   const half = (nibSize() / 2) * nibScale(pr);
   const theta = Math.atan2(dy, dx) - nibAngle;
-  return Math.max(1, nibExtentAlong(half * sh.w, half * sh.h, theta) / spacing);
+  return Math.max(1, nibExtentAlong(half * sh.w, half * shapeH(sh, nibSize()), theta) / spacing);
 }
 
 function strokeTo(x, y, t, pr) {
@@ -416,7 +431,7 @@ function strokeTo(x, y, t, pr) {
   const step = isSpray() ? 0.28 : sh.round ? 0.3 : 0.2;
   // spacing must follow the size actually stamped: dynamic width shrinks fast
   // strokes, and keeping full-size spacing would break them into beads
-  let spacing = Math.max(1.5, nibSize() * Math.min(sh.w, sh.h) * step * nibScale(pr));
+  let spacing = Math.max(1.5, nibSize() * Math.min(sh.w, shapeH(sh, nibSize())) * step * nibScale(pr));
   // A long jump (fast stroke, or a synthetic drag) must not cost unbounded
   // work: thin the stamps out rather than stamping thousands of times.
   if (dist / spacing > MAX_STAMPS) spacing = dist / MAX_STAMPS;
@@ -450,6 +465,8 @@ function canvasPos(e) {
 canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   drawing = true;
+  sctx.clearRect(0, 0, W, H);
+  strokeCanvas.style.opacity = brushOpacity;
   speed = 0;
   dynScale = 1; // every stroke touches down at full width
   leftover = 0;
@@ -484,7 +501,14 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 function endStroke() {
+  if (!drawing) return;
   drawing = false;
+  // bake the finished stroke into the paper at the slider's opacity
+  ctx.save();
+  ctx.globalAlpha = brushOpacity;
+  ctx.drawImage(strokeCanvas, 0, 0, W, H);
+  ctx.restore();
+  sctx.clearRect(0, 0, W, H);
 }
 canvas.addEventListener('pointerup', endStroke);
 canvas.addEventListener('pointercancel', endStroke);
@@ -684,7 +708,7 @@ function updateCursor(e) {
   cursorEl.style.top = `${e.clientY - rect.top}px`;
   const sh = activeShape();
   cursorEl.style.width = `${nibSize() * sh.w}px`;
-  cursorEl.style.height = `${nibSize() * sh.h}px`;
+  cursorEl.style.height = `${nibSize() * shapeH(sh, nibSize())}px`;
   cursorEl.style.borderRadius = sh.round ? '50%' : '1px';
   cursorEl.style.transform = `translate(-50%, -50%) rotate(${angleInput.value}deg)`;
 }
